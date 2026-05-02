@@ -1,0 +1,21 @@
+# BookWise — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]       # includes websockets + faster event loop (uvloop)
+
+# ── Data & ML ────────────────────────────────────────────────────────────────
+pandas
+numpy
+scipy
+scikit-learn            # TfidfVectorizer, cosine_similarity
+
+# ── HTTP client (async — needed for Google Books API) ─────────────────────────
+httpx
+
+# ── Environment variable management ──────────────────────────────────────────
+python-dotenv           # loads .env files automatically at startup
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+requests                # used by download_data.py (sync download)

@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Readwise — Book Recommendations</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8f7ff;
+      background-image:
+        radial-gradient(circle at 18% 22%, rgba(139, 92, 246, 0.08) 0%, transparent 55%),
+        radial-gradient(circle at 82% 10%, rgba(99, 102, 241, 0.07) 0%, transparent 50%),
+        radial-gradient(circle at 55% 85%, rgba(167, 139, 250, 0.06) 0%, transparent 50%),
+        radial-gradient(circle at 5% 70%,  rgba(79, 70, 229, 0.05) 0%, transparent 45%),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Ccircle cx='1' cy='1' r='1' fill='%236366f1' fill-opacity='0.10'/%3E%3C/svg%3E");
+      background-size: auto, auto, auto, auto, 32px 32px;
+    }
+
+    /* Floating orbs — decorative, pointer-events off */
+    body::before, body::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(80px);
+    }
+    body::before {
+      width: 520px; height: 520px;
+      top: -160px; left: -120px;
+      background: radial-gradient(circle, rgba(139,92,246,0.12) 0%, transparent 70%);
+      animation: drift 18s ease-in-out infinite alternate;
+    }
+    body::after {
+      width: 440px; height: 440px;
+      bottom: -120px; right: -100px;
+      background: radial-gradient(circle, rgba(99,102,241,0.10) 0%, transparent 70%);
+      animation: drift 22s ease-in-out infinite alternate-reverse;
+    }
+    @keyframes drift {
+      from { transform: translate(0, 0) scale(1);   }
+      to   { transform: translate(30px, 20px) scale(1.05); }
+    }
+
+    /* Make all content sit above the background layer.
+       NO blanket z-index on sections — that creates competing stacking contexts
+       which trap absolutely-positioned children (like the autocomplete dropdown)
+       beneath sibling sections. Each section that needs a specific stacking level
+       gets it explicitly via its ID below. */
+    nav, section, footer { position: relative; }
+
+    /* Hero section must outrank the Filters section so the autocomplete dropdown
+       (absolute-positioned inside #search-container → inside #hero-section) can
+       float freely above the mood chips and CTA button below it. */
+    #hero-section    { z-index: 20; }
+
+    /* Filters section sits beneath hero — never occludes the dropdown. */
+    #filters-section { z-index: 10; }
+
+    /* Fade-in animation */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up {
+      animation: fadeUp 0.35s ease both;
+    }
+    .fade-up-delay-1 { animation-delay: 0.05s; }
+    .fade-up-delay-2 { animation-delay: 0.10s; }
+    .fade-up-delay-3 { animation-delay: 0.15s; }
+    .fade-up-delay-4 { animation-delay: 0.20s; }
+
+    /* Autocomplete */
+    #autocomplete-dropdown {
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
+    /* Score bar */
+    .score-bar-fill {
+      transition: width 0.6s ease;
+    }
+
+    /* Card hover */
+    .book-card {
+      transition: box-shadow 0.18s ease, transform 0.18s ease;
+    }
+    .book-card:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+      transform: translateY(-1px);
+    }
+
+    /* Chip active state */
+    .mood-chip.active {
+      background-color: #eef2ff;
+      border-color: #a5b4fc;
+      color: #4338ca;
+    }
+
+    /* Feedback active */
+    .fb-btn.liked  { color: #4f46e5; }
+    .fb-btn.disliked { color: #ef4444; }
+
+    /* Subtle scrollbar */
+    #autocomplete-dropdown::-webkit-scrollbar { width: 4px; }
+    #autocomplete-dropdown::-webkit-scrollbar-track { background: transparent; }
+    #autocomplete-dropdown::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
+
+    /* Section divider */
+    .section-divider {
+      border: none;
+      border-top: 1px solid #f3f4f6;
+    }
+
+    /* ── Book Detail Modal ───────────────────────────────────── */
+    @keyframes modalIn {
+      from { opacity: 0; transform: translateY(18px) scale(0.98); }
+      to   { opacity: 1; transform: translateY(0)    scale(1);    }
+    }
+    @keyframes backdropIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    #book-detail-backdrop {
+      animation: backdropIn 0.2s ease both;
+    }
+    #book-detail-modal {
+      animation: modalIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+      max-height: calc(100vh - 80px);
+    }
+
+    /* Availability link pill */
+    .avail-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 13px;
+      border-radius: 9999px;
+      border: 1px solid #e5e7eb;
+      font-size: 12px;
+      color: #374151;
+      background: #fff;
+      text-decoration: none;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .avail-link:hover {
+      background: #f9fafb;
+      border-color: #d1d5db;
+      color: #111827;
+    }
+    .avail-link.free {
+      border-color: #d1fae5;
+      color: #065f46;
+      background: #f0fdf4;
+    }
+    .avail-link.free:hover {
+      background: #dcfce7;
+      border-color: #6ee7b7;
+    }
+
+    /* Skeleton shimmer */
+    @keyframes shimmer {
+      0%   { background-position: -400px 0; }
+      100% { background-position:  400px 0; }
+    }
+    .skeleton {
+      background: linear-gradient(90deg, #f3f4f6 25%, #e9eaec 50%, #f3f4f6 75%);
+      background-size: 800px 100%;
+      animation: shimmer 1.4s ease infinite;
+      border-radius: 4px;
+    }
+
+    /* Description text */
+    .book-description {
+      font-size: 13.5px;
+      line-height: 1.75;
+      color: #374151;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .book-description.expanded { -webkit-line-clamp: unset !important; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-800">
+
+  <!-- ─── NAV ─────────────────────────────────────────────── -->
+  <nav class="bg-white/80 backdrop-blur-md border-b border-gray-200/70 sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+        </svg>
+        <span class="font-semibold text-gray-800 tracking-tight text-[15px]">Readwise</span>
+      </div>
+      <div class="flex items-center gap-4 text-sm text-gray-500">
+        <a href="#" class="hover:text-gray-700 transition-colors">Browse</a>
+        <a href="#" class="hover:text-gray-700 transition-colors">Lists</a>
+        <button class="bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-medium px-4 py-1.5 rounded-md transition-colors">Sign in</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ─── HERO ─────────────────────────────────────────────── -->
+  <section id="hero-section" class="max-w-3xl mx-auto px-6 pt-20 pb-12 text-center">
+    <span class="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-600 text-xs font-medium px-3 py-1 rounded-full border border-indigo-100 mb-6">
+      <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block"></span>
+      AI-Powered Recommendations
+    </span>
+    <h1 class="text-4xl font-semibold text-gray-800 leading-tight tracking-tight mb-4">
+      Discover books tailored<br class="hidden sm:block" /> to your taste
+    </h1>
+    <p class="text-gray-500 text-base mb-10 max-w-lg mx-auto leading-relaxed">
+      Tell us what you're in the mood for and we'll surface books you'll actually finish — curated by reading patterns, not bestseller lists.
+    </p>
+
+    <!-- Search bar -->
+    <div class="relative max-w-xl mx-auto" id="search-container">
+      <div class="flex items-center bg-white border border-gray-200 rounded-lg shadow-sm focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-50 transition-all">
+        <div class="pl-4 pr-2 text-gray-400 flex-shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+        </div>
+        <input
+          id="search-input"
+          type="text"
+          placeholder="Search a book, author, or genre…"
+          autocomplete="off"
+          class="flex-1 py-3 pr-3 text-sm text-gray-700 placeholder-gray-400 bg-transparent outline-none"
+        />
+        <button
+          id="clear-btn"
+          class="hidden px-3 text-gray-400 hover:text-gray-600 transition-colors"
+          aria-label="Clear search"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Autocomplete dropdown
+           z-[200] → beats any sibling stacking context at z-20 / z-10.
+           bg-white + shadow-lg → fully opaque, nothing bleeds through. -->
+      <div id="autocomplete-dropdown"
+           class="hidden absolute top-full left-0 right-0 mt-1.5
+                  bg-white border border-gray-200 rounded-lg shadow-lg
+                  z-[200] py-1 overflow-hidden"></div>
+    </div>
+  </section>
+
+  <!-- ─── FILTERS + CTA ─────────────────────────────────────── -->
+  <!-- No z-index class here. #filters-section { z-index: 10 } from CSS is enough,
+       and it is intentionally lower than #hero-section so the dropdown wins. -->
+  <section id="filters-section" class="max-w-3xl mx-auto px-6 pb-14">
+    <p class="text-xs font-medium text-gray-400 uppercase tracking-widest mb-3 text-center">Mood</p>
+    <div class="flex flex-wrap justify-center gap-2 mb-8" id="mood-chips">
+      <button class="mood-chip px-4 py-1.5 rounded-full border border-gray-200 text-sm text-gray-600 bg-white hover:border-indigo-200 hover:text-indigo-600 transition-all" data-mood="Mind-Bending">🌀 Mind-Bending</button>
+      <button class="mood-chip px-4 py-1.5 rounded-full border border-gray-200 text-sm text-gray-600 bg-white hover:border-indigo-200 hover:text-indigo-600 transition-all" data-mood="Dark">🌑 Dark</button>
+      <button class="mood-chip px-4 py-1.5 rounded-full border border-gray-200 text-sm text-gray-600 bg-white hover:border-indigo-200 hover:text-indigo-600 transition-all" data-mood="Emotional">💧 Emotional</button>
+      <button class="mood-chip px-4 py-1.5 rounded-full border border-gray-200 text-sm text-gray-600 bg-white hover:border-indigo-200 hover:text-indigo-600 transition-all" data-mood="Light">☀️ Light</button>
+      <button class="mood-chip px-4 py-1.5 rounded-full border border-gray-200 text-sm text-gray-600 bg-white hover:border-indigo-200 hover:text-indigo-600 transition-all" data-mood="Epic">⚡ Epic</button>
+      <button class="mood-chip px-4 py-1.5 rounded-full border border-gray-200 text-sm text-gray-600 bg-white hover:border-indigo-200 hover:text-indigo-600 transition-all" data-mood="Thought-Provoking">🔭 Thought-Provoking</button>
+    </div>
+
+    <div class="flex justify-center">
+      <button
+        id="recommend-btn"
+        class="bg-indigo-500 hover:bg-indigo-600 active:scale-95 text-white text-sm font-medium px-8 py-2.5 rounded-lg transition-all shadow-sm flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 3l14 9L5 21V3z"/>
+        </svg>
+        Get Recommendations
+      </button>
+    </div>
+  </section>
+
+  <!-- ─── RESULTS AREA ──────────────────────────────────────── -->
+  <section class="max-w-6xl mx-auto px-6 pb-24">
+
+    <!-- Loading state -->
+    <div id="loading-state" class="hidden text-center py-16">
+      <div class="inline-flex items-center gap-3 text-gray-400 text-sm">
+        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke-opacity="0.3"/>
+          <path d="M21 12a9 9 0 0 1-9 9" stroke-linecap="round"/>
+        </svg>
+        Finding books for you…
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="text-center py-20">
+      <div class="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+        <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+        </svg>
+      </div>
+      <p class="text-gray-500 text-sm">Your recommendations will appear here.</p>
+      <p class="text-gray-400 text-xs mt-1">Search a book or pick a mood to get started.</p>
+    </div>
+
+    <!-- Error state -->
+    <div id="error-state" class="hidden max-w-md mx-auto bg-red-50 border border-red-100 rounded-lg px-5 py-4 text-sm text-red-600 flex items-start gap-3">
+      <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 8v4m0 4h.01"/>
+      </svg>
+      <span id="error-msg">Something went wrong. Please try again.</span>
+    </div>
+
+    <!-- Results header -->
+    <div id="results-header" class="hidden flex items-center justify-between mb-6">
+      <div>
+        <h2 class="text-base font-semibold text-gray-800">Recommendations</h2>
+        <p class="text-xs text-gray-400 mt-0.5" id="results-meta">—</p>
+      </div>
+      <button id="clear-results-btn" class="text-xs text-gray-400 hover:text-gray-600 transition-colors">Clear</button>
+    </div>
+
+    <!-- Book cards grid -->
+    <div id="results-grid" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+    <!-- ─── Similar books panel ─────────────────────────────── -->
+    <div id="similar-panel" class="hidden mt-10">
+      <hr class="section-divider mb-8" />
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-700">Similar to <span id="similar-title" class="text-indigo-500"></span></h3>
+          <p class="text-xs text-gray-400 mt-0.5">Books with overlapping themes and style</p>
+        </div>
+        <button id="close-similar-btn" class="text-xs text-gray-400 hover:text-gray-600 transition-colors">Dismiss</button>
+      </div>
+
+      <div id="similar-loading" class="hidden text-center py-8">
+        <div class="inline-flex items-center gap-2 text-gray-400 text-xs">
+          <svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke-opacity="0.3"/>
+            <path d="M21 12a9 9 0 0 1-9 9" stroke-linecap="round"/>
+          </svg>
+          Loading similar books…
+        </div>
+      </div>
+
+      <div id="similar-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"></div>
+    </div>
+  </section>
+
+  <!-- ─── BOOK DETAIL MODAL ───────────────────────────────────── -->
+  <div id="book-detail-backdrop"
+       class="hidden fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 sm:p-6"
+       style="background: rgba(15,15,30,0.28); backdrop-filter: blur(3px);">
+
+    <div id="book-detail-modal"
+         class="relative w-full max-w-lg bg-white rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col"
+         role="dialog" aria-modal="true" aria-labelledby="detail-title">
+
+      <!-- Top bar -->
+      <div class="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+        <div class="flex-1 min-w-0 pr-4">
+          <div class="flex items-center gap-2 mb-1">
+            <span id="detail-genre"
+                  class="text-[10px] font-medium text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+              Fiction
+            </span>
+            <span id="detail-year" class="text-[10px] text-gray-400"></span>
+            <span id="detail-pages" class="text-[10px] text-gray-400"></span>
+          </div>
+          <h2 id="detail-title" class="text-sm font-semibold text-gray-900 leading-snug"></h2>
+          <p id="detail-author" class="text-xs text-gray-500 mt-0.5"></p>
+        </div>
+        <!-- Cover thumbnail -->
+        <div id="detail-cover-wrap" class="hidden flex-shrink-0">
+          <img id="detail-cover"
+               alt="Book cover"
+               class="w-12 h-[68px] object-cover rounded border border-gray-200 shadow-sm" />
+        </div>
+        <button id="close-detail-btn"
+                class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100 transition-all"
+                aria-label="Close">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Scrollable body -->
+      <div class="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+
+        <!-- Description -->
+        <div>
+          <p class="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2">About this book</p>
+
+          <!-- Skeleton while loading -->
+          <div id="desc-skeleton" class="space-y-2">
+            <div class="skeleton h-3 w-full"></div>
+            <div class="skeleton h-3 w-[90%]"></div>
+            <div class="skeleton h-3 w-[95%]"></div>
+            <div class="skeleton h-3 w-[70%]"></div>
+          </div>
+
+          <!-- Actual description -->
+          <div id="desc-content" class="hidden">
+            <p id="detail-description" class="book-description" style="-webkit-line-clamp:5;"></p>
+            <button id="toggle-desc-btn"
+                    class="mt-2 text-[11px] text-indigo-500 hover:text-indigo-700 font-medium transition-colors hidden">
+              Show more
+            </button>
+          </div>
+
+          <!-- No description fallback -->
+          <p id="desc-fallback" class="hidden text-xs text-gray-400 italic">No description available for this title.</p>
+        </div>
+
+        <!-- Divider -->
+        <hr class="border-gray-100" />
+
+        <!-- Purchase Options -->
+        <div>
+          <p class="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-3">Purchase Options</p>
+          <div id="purchase-links" class="flex flex-wrap gap-2">
+            <!-- Injected dynamically -->
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <hr class="border-gray-100" />
+
+        <!-- Free / Library Options -->
+        <div>
+          <div class="flex items-center gap-2 mb-3">
+            <p class="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Free &amp; Library</p>
+            <span id="free-checking"
+                  class="inline-flex items-center gap-1 text-[10px] text-gray-400">
+              <svg class="w-2.5 h-2.5 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke-opacity="0.3"/>
+                <path d="M21 12a9 9 0 0 1-9 9" stroke-linecap="round"/>
+              </svg>
+              checking…
+            </span>
+          </div>
+          <div id="free-links" class="flex flex-wrap gap-2">
+            <!-- Injected dynamically -->
+          </div>
+          <p id="free-note" class="hidden text-[11px] text-gray-400 mt-2 leading-relaxed">
+            No verified free edition found. The Archive.org search may still have a copy.
+          </p>
+        </div>
+
+        <!-- Google Preview link (if available) -->
+        <div id="preview-wrap" class="hidden pt-1">
+          <hr class="border-gray-100 mb-4" />
+          <a id="preview-link"
+             href="#"
+             target="_blank"
+             rel="noopener noreferrer"
+             class="inline-flex items-center gap-1.5 text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            </svg>
+            Preview on Google Books
+          </a>
+        </div>
+
+      </div><!-- /scrollable body -->
+
+      <!-- Footer note -->
+      <div class="px-6 py-3 border-t border-gray-100 bg-gray-50/60 flex-shrink-0">
+        <p class="text-[10px] text-gray-400">Links open in a new tab · Availability varies by region</p>
+      </div>
+
+    </div><!-- /modal -->
+  </div><!-- /backdrop -->
+
+  <!-- ─── FOOTER ────────────────────────────────────────────── -->
+  <footer class="border-t border-gray-200/70 bg-white/70 backdrop-blur-sm py-8">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400">
+      <span>© 2025 Readwise · All rights reserved</span>
+      <div class="flex gap-4">
+        <a href="#" class="hover:text-gray-600 transition-colors">Privacy</a>
+        <a href="#" class="hover:text-gray-600 transition-colors">Terms</a>
+        <a href="#" class="hover:text-gray-600 transition-colors">Docs</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ─── JAVASCRIPT ─────────────────────────────────────────── -->
+  <script>
+    // ─── CONFIG ───────────────────────────────────────────────
+    const API_BASE = '';          // same-origin; change to 'http://localhost:8000' for dev
+
+    // ─── STATE ────────────────────────────────────────────────
+    let selectedMood    = null;
+    let activeSimilarId = null;
+    let searchTimeout   = null;
+    let feedbackState   = {};     // { bookId: 'liked' | 'disliked' }
+
+    // ─── DOM REFS ─────────────────────────────────────────────
+    const searchInput      = document.getElementById('search-input');
+    const clearBtn         = document.getElementById('clear-btn');
+    const dropdown         = document.getElementById('autocomplete-dropdown');
+    const moodChips        = document.querySelectorAll('.mood-chip');
+    const recommendBtn     = document.getElementById('recommend-btn');
+    const loadingState     = document.getElementById('loading-state');
+    const emptyState       = document.getElementById('empty-state');
+    const errorState       = document.getElementById('error-state');
+    const errorMsg         = document.getElementById('error-msg');
+    const resultsHeader    = document.getElementById('results-header');
+    const resultsMeta      = document.getElementById('results-meta');
+    const resultsGrid      = document.getElementById('results-grid');
+    const clearResultsBtn  = document.getElementById('clear-results-btn');
+    const similarPanel     = document.getElementById('similar-panel');
+    const similarTitle     = document.getElementById('similar-title');
+    const similarLoading   = document.getElementById('similar-loading');
+    const similarGrid      = document.getElementById('similar-grid');
+    const closeSimilarBtn  = document.getElementById('close-similar-btn');
+
+    // ─── HELPERS ──────────────────────────────────────────────
+    function show(el) { el.classList.remove('hidden'); }
+    function hide(el) { el.classList.add('hidden');    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg || 'Something went wrong. Please try again.';
+      show(errorState);
+      setTimeout(() => hide(errorState), 5000);
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    async function apiFetch(url, options = {}) {
+      const res = await fetch(API_BASE + url, {
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        ...options,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(body || `HTTP ${res.status}`);
+      }
+      return res.json();
+    }
+
+    // ─── SCORE BAR ────────────────────────────────────────────
+    function scoreBar(score) {
+      // score is expected 0–1; multiply by 100 for %
+      const pct = Math.min(100, Math.max(0, Math.round((score ?? 0) * 100)));
+      return `
+        <div class="flex items-center gap-2 mt-3">
+          <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="score-bar-fill h-full bg-indigo-400 rounded-full" style="width:0%" data-target="${pct}%"></div>
+          </div>
+          <span class="text-xs text-gray-400 w-8 text-right">${pct}%</span>
+        </div>`;
+    }
+
+    function animateScoreBars(container) {
+      requestAnimationFrame(() => {
+        container.querySelectorAll('.score-bar-fill[data-target]').forEach(bar => {
+          bar.style.width = bar.dataset.target;
+        });
+      });
+    }
+
+    // ─── BOOK CARD ────────────────────────────────────────────
+    function buildBookCard(book, idx) {
+      const delayClass = `fade-up-delay-${Math.min(idx + 1, 4)}`;
+      const fb = feedbackState[book.id] || null;
+      const likedClass   = fb === 'liked'    ? 'liked'    : '';
+      const dislikedClass= fb === 'disliked' ? 'disliked' : '';
+
+      return `
+        <div class="book-card bg-white border border-gray-200 rounded-lg p-5 cursor-pointer fade-up ${delayClass}"
+             data-book-id="${escapeHtml(book.id)}"
+             data-book-title="${escapeHtml(book.title)}">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800 leading-snug truncate">${escapeHtml(book.title)}</p>
+              <p class="text-xs text-gray-500 mt-0.5">${escapeHtml(book.author || '—')}</p>
+            </div>
+            <span class="flex-shrink-0 text-[10px] font-medium text-indigo-400 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+              ${escapeHtml(book.genre || 'Fiction')}
+            </span>
+          </div>
+
+          ${scoreBar(book.score)}
+
+          ${book.reason ? `
+          <p class="text-xs text-gray-400 mt-3 leading-relaxed line-clamp-2">${escapeHtml(book.reason)}</p>` : ''}
+
+          <div class="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
+            <button class="text-[11px] text-indigo-400 hover:text-indigo-600 font-medium transition-colors similar-trigger"
+                    data-book-id="${escapeHtml(book.id)}"
+                    data-book-title="${escapeHtml(book.title)}">
+              View similar →
+            </button>
+            <div class="flex items-center gap-1">
+              <button class="fb-btn ${likedClass} text-gray-400 hover:text-indigo-500 p-1.5 rounded-md hover:bg-indigo-50 transition-all"
+                      data-book-id="${escapeHtml(book.id)}"
+                      data-action="liked"
+                      title="Good recommendation">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                </svg>
+              </button>
+              <button class="fb-btn ${dislikedClass} text-gray-400 hover:text-red-400 p-1.5 rounded-md hover:bg-red-50 transition-all"
+                      data-book-id="${escapeHtml(book.id)}"
+                      data-action="disliked"
+                      title="Not relevant">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ─── SIMILAR CARD (compact) ───────────────────────────────
+    function buildSimilarCard(book, idx) {
+      const delayClass = `fade-up-delay-${Math.min(idx + 1, 4)}`;
+      return `
+        <div class="book-card bg-white border border-gray-200 rounded-lg p-4 fade-up ${delayClass}">
+          <p class="text-xs font-medium text-gray-800 leading-snug line-clamp-2">${escapeHtml(book.title)}</p>
+          <p class="text-xs text-gray-400 mt-1 truncate">${escapeHtml(book.author || '—')}</p>
+          ${scoreBar(book.score)}
+        </div>`;
+    }
+
+    // ─── RENDER RESULTS ───────────────────────────────────────
+    function renderResults(books, meta) {
+      hide(emptyState);
+      hide(loadingState);
+      hide(errorState);
+
+      if (!books || books.length === 0) {
+        resultsGrid.innerHTML = '';
+        hide(resultsGrid);
+        hide(resultsHeader);
+        showError('No recommendations found. Try a different query or mood.');
+        return;
+      }
+
+      resultsGrid.innerHTML = books.map((b, i) => buildBookCard(b, i)).join('');
+      resultsMeta.textContent = `${books.length} book${books.length > 1 ? 's' : ''} found${meta ? ' · ' + meta : ''}`;
+
+      show(resultsHeader);
+      show(resultsGrid);
+      animateScoreBars(resultsGrid);
+
+      // attach events inside cards
+      resultsGrid.querySelectorAll('.similar-trigger').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          loadSimilar(btn.dataset.bookId, btn.dataset.bookTitle);
+        });
+      });
+      resultsGrid.querySelectorAll('.fb-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          submitFeedback(btn.dataset.bookId, btn.dataset.action, btn);
+        });
+      });
+      // Card body click → open Book Details modal
+      // We store the full book object in data attributes so we can reconstruct it
+      resultsGrid.querySelectorAll('.book-card').forEach((card, idx) => {
+        card.addEventListener('click', e => {
+          // Ignore clicks on interactive child elements
+          if (e.target.closest('.similar-trigger, .fb-btn')) return;
+          const book = books[idx];
+          if (book) openBookDetails(book);
+        });
+      });
+    }
+
+    // ─── DOM REFS (detail modal) ──────────────────────────────
+    const detailBackdrop   = document.getElementById('book-detail-backdrop');
+    const closeDetailBtn   = document.getElementById('close-detail-btn');
+    const detailTitle      = document.getElementById('detail-title');
+    const detailAuthor     = document.getElementById('detail-author');
+    const detailGenre      = document.getElementById('detail-genre');
+    const detailYear       = document.getElementById('detail-year');
+    const detailPages      = document.getElementById('detail-pages');
+    const detailCoverWrap  = document.getElementById('detail-cover-wrap');
+    const detailCover      = document.getElementById('detail-cover');
+    const descSkeleton     = document.getElementById('desc-skeleton');
+    const descContent      = document.getElementById('desc-content');
+    const descFallback     = document.getElementById('desc-fallback');
+    const detailDesc       = document.getElementById('detail-description');
+    const toggleDescBtn    = document.getElementById('toggle-desc-btn');
+    const purchaseLinks    = document.getElementById('purchase-links');
+    const freeLinks        = document.getElementById('free-links');
+    const freeChecking     = document.getElementById('free-checking');
+    const freeNote         = document.getElementById('free-note');
+    const previewWrap      = document.getElementById('preview-wrap');
+    const previewLink      = document.getElementById('preview-link');
+
+    // ─── UTILITY: Build purchase search URLs ──────────────────
+    /**
+     * Constructs direct search URLs for Amazon & Flipkart.
+     * Prefers ISBN for Amazon (more accurate), falls back to title+author query.
+     * @param {string} title
+     * @param {string} author
+     * @param {string|null} isbn
+     * @returns {{ amazon: string, flipkart: string }}
+     */
+    function buildPurchaseLinks(title, author, isbn) {
+      const titleAuthorQuery = encodeURIComponent(
+        [title, author].filter(Boolean).join(' ')
+      );
+      const amazonUrl = isbn
+        ? `https://www.amazon.com/s?k=${encodeURIComponent(isbn)}&i=stripbooks`
+        : `https://www.amazon.com/s?k=${titleAuthorQuery}&i=stripbooks`;
+      const flipkartUrl =
+        `https://www.flipkart.com/search?q=${titleAuthorQuery}&sid=bks`;
+      return { amazon: amazonUrl, flipkart: flipkartUrl };
+    }
+
+    // ─── UTILITY: Fetch Google Books metadata ─────────────────
+    /**
+     * Queries the Google Books API for full volume info.
+     * Tries ISBN first, falls back to title+author keyword search.
+     * @returns {object|null} volume info fields
+     */
+    async function fetchGoogleBooksDetails(title, author, isbn) {
+      try {
+        // Build query — ISBN is most precise
+        const query = isbn
+          ? `isbn:${encodeURIComponent(isbn)}`
+          : `intitle:${encodeURIComponent(title)}${author ? `+inauthor:${encodeURIComponent(author)}` : ''}`;
+
+        const res  = await fetch(
+          `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1&fields=items(volumeInfo)`
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        const vol  = data.items?.[0]?.volumeInfo;
+        if (!vol) return null;
+
+        return {
+          description:  vol.description   || null,
+          thumbnail:    vol.imageLinks?.thumbnail?.replace('http://', 'https://') || null,
+          publisher:    vol.publisher      || null,
+          publishedDate: vol.publishedDate || null,
+          pageCount:    vol.pageCount      || null,
+          categories:   vol.categories    || [],
+          previewLink:  vol.previewLink    || null,
+          // Prefer ISBN-13, then ISBN-10, then what was passed in
+          isbn: vol.industryIdentifiers?.find(i => i.type === 'ISBN_13')?.identifier
+             || vol.industryIdentifiers?.find(i => i.type === 'ISBN_10')?.identifier
+             || isbn
+             || null,
+        };
+      } catch {
+        return null;
+      }
+    }
+
+    // ─── UTILITY: Fetch Open Library / Archive.org links ──────
+    /**
+     * Checks Open Library API for a free readable or downloadable version.
+     * Strategy:
+     *   1. ISBN lookup via /api/books  → most accurate, reveals ebook URLs
+     *   2. Keyword search via /search.json → finds Internet Archive identifiers
+     *   3. Always appends a fallback Archive.org keyword search link.
+     *
+     * @returns {Array<{ label: string, url: string, verified: boolean }>}
+     */
+    async function fetchOpenLibraryLinks(title, author, isbn) {
+      const links = [];
+
+      try {
+        // ── Pass 1: ISBN lookup ──────────────────────────────
+        if (isbn) {
+          const r = await fetch(
+            `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(isbn)}&format=json&jscmd=data`
+          );
+          if (r.ok) {
+            const data = await r.json();
+            const entry = data[`ISBN:${isbn}`];
+            if (entry) {
+              // Direct ebook preview on Archive.org
+              if (entry.ebooks?.length) {
+                const eb = entry.ebooks[0];
+                links.push({
+                  label:    'Read on Archive.org',
+                  url:      eb.preview_url || `https://archive.org/search?query=${encodeURIComponent(title)}`,
+                  verified: true,
+                });
+              }
+              // Open Library page for the work
+              if (entry.url) {
+                links.push({
+                  label:    'Open Library Page',
+                  url:      entry.url,
+                  verified: true,
+                });
+              }
+            }
+          }
+        }
+
+        // ── Pass 2: Search by title+author for IA identifier ──
+        if (links.length === 0) {
+          const q = encodeURIComponent(`${title} ${author || ''}`);
+          const r = await fetch(
+            `https://openlibrary.org/search.json?q=${q}&limit=3&fields=key,title,ia,lending_edition_s,public_scan_b`
+          );
+          if (r.ok) {
+            const data = await r.json();
+            for (const doc of (data.docs || [])) {
+              // public_scan_b = true means Archive.org has a freely readable scan
+              if (doc.ia?.length) {
+                const iaId = doc.ia[0];
+                links.push({
+                  label:    doc.public_scan_b ? 'Read Free on Archive.org' : 'Preview on Archive.org',
+                  url:      `https://archive.org/details/${encodeURIComponent(iaId)}`,
+                  verified: !!doc.public_scan_b,
+                });
+              }
+              if (doc.key) {
+                links.push({
+                  label:    'Open Library',
+                  url:      `https://openlibrary.org${doc.key}`,
+                  verified: false,
+                });
+              }
+              if (links.length >= 3) break;
+            }
+          }
+        }
+      } catch { /* network failure — fall through to fallback */ }
+
+      // ── Pass 3: Always add keyword search fallback ───────────
+      const alreadyHasArchive = links.some(l => l.url.includes('archive.org'));
+      if (!alreadyHasArchive) {
+        const q = encodeURIComponent(`${title} ${author || ''}`);
+        links.push({
+          label:    'Search Archive.org',
+          url:      `https://archive.org/search?query=${q}`,
+          verified: false,
+        });
+      }
+
+      return links;
+    }
+
+    // ─── RENDER: Link pill helper ─────────────────────────────
+    function linkPill({ label, url, icon, free }) {
+      const freeClass = free ? 'free' : '';
+      return `
+        <a href="${url}"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="avail-link ${freeClass}">
+          ${icon}
+          ${escapeHtml(label)}
+          <svg class="w-2.5 h-2.5 opacity-40" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+        </a>`;
+    }
+
+    // ─── MODAL: Open & populate ───────────────────────────────
+    async function openBookDetails(book) {
+      // ── Reset state ──────────────────────────────────────────
+      show(descSkeleton);
+      hide(descContent);
+      hide(descFallback);
+      hide(freeNote);
+      hide(previewWrap);
+      detailCoverWrap.classList.add('hidden');
+      show(freeChecking);
+      purchaseLinks.innerHTML = '';
+      freeLinks.innerHTML = '';
+      detailDesc.classList.remove('expanded');
+      toggleDescBtn.classList.add('hidden');
+      toggleDescBtn.textContent = 'Show more';
+
+      // ── Fill static fields immediately ───────────────────────
+      detailTitle.textContent  = book.title  || 'Unknown Title';
+      detailAuthor.textContent = book.author ? `by ${book.author}` : '';
+      detailGenre.textContent  = book.genre  || 'Book';
+      detailYear.textContent   = '';
+      detailPages.textContent  = '';
+
+      // ── Show modal ───────────────────────────────────────────
+      show(detailBackdrop);
+      document.body.style.overflow = 'hidden';
+
+      // ── Inject purchase links immediately (no API needed) ────
+      const { amazon, flipkart } = buildPurchaseLinks(book.title, book.author, book.isbn || null);
+      purchaseLinks.innerHTML = [
+        linkPill({
+          label: 'Amazon',
+          url: amazon,
+          free: false,
+          icon: `<svg class="w-3 h-3 text-amber-500" viewBox="0 0 24 24" fill="currentColor">
+                   <path d="M13.958 10.09c0 1.232.029 2.256-.591 3.351-.502.891-1.301 1.438-2.186 1.438-1.214 0-1.922-.924-1.922-2.292 0-2.692 2.415-3.182 4.699-3.182v.685zm3.186 7.705a.659.659 0 0 1-.757.074c-1.063-.883-1.252-1.29-1.836-2.129-1.755 1.789-2.999 2.324-5.275 2.324-2.692 0-4.791-1.662-4.791-4.988 0-2.598 1.409-4.368 3.414-5.231 1.735-.763 4.16-.899 6.012-1.108v-.412c0-.757.059-1.652-.385-2.308-.385-.586-1.131-.828-1.786-.828-1.214 0-2.292.624-2.556 1.919-.054.285-.267.567-.554.582l-3.092-.333c-.26-.059-.548-.267-.474-.663C5.944 2.006 8.91 1 11.562 1c1.438 0 3.319.383 4.455 1.471 1.438 1.341 1.301 3.13 1.301 5.076v4.6c0 1.384.574 1.992 1.115 2.739.193.267.234.586-.01.785-.601.5-1.668 1.43-2.255 1.954l-.024-.021z"/>
+                 </svg>`,
+        }),
+        linkPill({
+          label: 'Flipkart',
+          url: flipkart,
+          free: false,
+          icon: `<svg class="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+                   <path d="M7 4h13l-1.5 9H8.5L7 4zm0 0L6 1H2m5 3-1.92 11.5H18M9 18a1 1 0 1 0 2 0 1 1 0 0 0-2 0zm7 0a1 1 0 1 0 2 0 1 1 0 0 0-2 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                 </svg>`,
+        }),
+      ].join('');
+
+      // ── Fetch Google Books + Open Library in parallel ────────
+      const [gbDetails, olLinks] = await Promise.all([
+        fetchGoogleBooksDetails(book.title, book.author, book.isbn || null),
+        fetchOpenLibraryLinks(book.title, book.author, book.isbn || null),
+      ]);
+
+      // ── Populate description ──────────────────────────────────
+      hide(descSkeleton);
+      const desc = gbDetails?.description || book.description || null;
+      if (desc) {
+        detailDesc.textContent = desc;
+        show(descContent);
+        // Only show "Show more" toggle if text overflows
+        requestAnimationFrame(() => {
+          if (detailDesc.scrollHeight > detailDesc.clientHeight + 4) {
+            toggleDescBtn.classList.remove('hidden');
+          }
+        });
+      } else {
+        show(descFallback);
+      }
+
+      // ── Populate meta from Google Books ───────────────────────
+      if (gbDetails) {
+        if (gbDetails.publishedDate) {
+          detailYear.textContent = `· ${gbDetails.publishedDate.slice(0, 4)}`;
+        }
+        if (gbDetails.pageCount) {
+          detailPages.textContent = `· ${gbDetails.pageCount} pages`;
+        }
+        if (gbDetails.thumbnail) {
+          detailCover.src = gbDetails.thumbnail;
+          detailCoverWrap.classList.remove('hidden');
+        }
+        if (gbDetails.categories?.length) {
+          detailGenre.textContent = gbDetails.categories[0].split(' / ')[0];
+        }
+        if (gbDetails.previewLink) {
+          previewLink.href = gbDetails.previewLink;
+          show(previewWrap);
+        }
+        // If Google Books returned a richer ISBN, re-inject Amazon link
+        if (gbDetails.isbn && gbDetails.isbn !== (book.isbn || null)) {
+          const { amazon: newAmz } = buildPurchaseLinks(book.title, book.author, gbDetails.isbn);
+          const amazonPill = purchaseLinks.querySelector('a');
+          if (amazonPill) amazonPill.href = newAmz;
+        }
+      }
+
+      // ── Populate free/library links ───────────────────────────
+      hide(freeChecking);
+      if (olLinks.length) {
+        const hasVerified = olLinks.some(l => l.verified);
+        if (!hasVerified) show(freeNote);
+        freeLinks.innerHTML = olLinks.map(l =>
+          linkPill({
+            label: l.label,
+            url:   l.url,
+            free:  l.verified,
+            icon: `<svg class="w-3 h-3 ${l.verified ? 'text-emerald-500' : 'text-gray-400'}"
+                        fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                     <path stroke-linecap="round" stroke-linejoin="round"
+                           d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                   </svg>`,
+          })
+        ).join('');
+      }
+    }
+
+    // ─── MODAL: Close ─────────────────────────────────────────
+    function closeBookDetails() {
+      hide(detailBackdrop);
+      document.body.style.overflow = '';
+    }
+
+    closeDetailBtn.addEventListener('click', closeBookDetails);
+
+    // Close on backdrop click (outside the modal card)
+    detailBackdrop.addEventListener('click', e => {
+      if (e.target === detailBackdrop) closeBookDetails();
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !detailBackdrop.classList.contains('hidden')) {
+        closeBookDetails();
+      }
+    });
+
+    // Toggle description expand/collapse
+    toggleDescBtn.addEventListener('click', () => {
+      const expanded = detailDesc.classList.contains('expanded');
+      detailDesc.classList.toggle('expanded', !expanded);
+      toggleDescBtn.textContent = expanded ? 'Show more' : 'Show less';
+    });
+
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim();
+      clearBtn.classList.toggle('hidden', !q);
+
+      clearTimeout(searchTimeout);
+      if (q.length < 2) { hide(dropdown); return; }
+
+      searchTimeout = setTimeout(async () => {
+        try {
+          const results = await apiFetch(`/search?q=${encodeURIComponent(q)}`);
+          renderDropdown(Array.isArray(results) ? results : (results.results || []));
+        } catch {
+          hide(dropdown);
+        }
+      }, 280);
+    });
+
+    function renderDropdown(items) {
+      if (!items.length) { hide(dropdown); return; }
+
+      dropdown.innerHTML = items.slice(0, 8).map(item => {
+        const label = escapeHtml(typeof item === 'string' ? item : (item.title || item.name || JSON.stringify(item)));
+        return `<div class="dropdown-item px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer flex items-center gap-2.5 transition-colors"
+                     data-value="${label}">
+                  <svg class="w-3.5 h-3.5 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                  </svg>
+                  ${label}
+                </div>`;
+      }).join('');
+
+      show(dropdown);
+
+      dropdown.querySelectorAll('.dropdown-item').forEach(item => {
+        item.addEventListener('mousedown', e => {
+          e.preventDefault();
+          searchInput.value = item.dataset.value;
+          clearBtn.classList.remove('hidden');
+          hide(dropdown);
+        });
+      });
+    }
+
+    clearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      clearBtn.classList.add('hidden');
+      hide(dropdown);
+      searchInput.focus();
+    });
+
+    document.addEventListener('click', e => {
+      if (!document.getElementById('search-container').contains(e.target)) {
+        hide(dropdown);
+      }
+    });
+
+    searchInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { hide(dropdown); fetchRecommendations(); }
+      if (e.key === 'Escape') { hide(dropdown); }
+    });
+
+    // ─── MOOD CHIPS ───────────────────────────────────────────
+    moodChips.forEach(chip => {
+      chip.addEventListener('click', () => {
+        if (selectedMood === chip.dataset.mood) {
+          // deselect
+          chip.classList.remove('active');
+          selectedMood = null;
+        } else {
+          moodChips.forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          selectedMood = chip.dataset.mood;
+        }
+      });
+    });
+
+    // ─── FETCH RECOMMENDATIONS ────────────────────────────────
+    recommendBtn.addEventListener('click', fetchRecommendations);
+
+    async function fetchRecommendations() {
+      hide(errorState);
+      hide(emptyState);
+      hide(resultsGrid);
+      hide(resultsHeader);
+      hide(similarPanel);
+      show(loadingState);
+
+      const payload = {
+        query: searchInput.value.trim() || null,
+        mood:  selectedMood || null,
+      };
+
+      try {
+        const data = await apiFetch('/recommend', {
+          method: 'POST',
+          body:   JSON.stringify(payload),
+        });
+        const books = Array.isArray(data) ? data : (data.recommendations || data.books || []);
+        const meta  = data.meta || null;
+        renderResults(books, meta);
+      } catch (err) {
+        hide(loadingState);
+        show(emptyState);
+        showError(`Failed to fetch recommendations: ${err.message}`);
+      }
+    }
+
+    // ─── CLEAR RESULTS ────────────────────────────────────────
+    clearResultsBtn.addEventListener('click', () => {
+      hide(resultsGrid);
+      hide(resultsHeader);
+      hide(similarPanel);
+      show(emptyState);
+      selectedMood = null;
+      moodChips.forEach(c => c.classList.remove('active'));
+    });
+
+    // ─── SIMILAR BOOKS ────────────────────────────────────────
+    async function loadSimilar(bookId, bookTitle) {
+      if (activeSimilarId === bookId) {
+        hide(similarPanel);
+        activeSimilarId = null;
+        return;
+      }
+
+      activeSimilarId = bookId;
+      similarTitle.textContent = bookTitle;
+      similarGrid.innerHTML = '';
+      show(similarPanel);
+      show(similarLoading);
+      hide(similarGrid);
+      similarPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      try {
+        const data = await apiFetch(`/similar/${encodeURIComponent(bookId)}`);
+        const books = Array.isArray(data) ? data : (data.similar || data.books || []);
+        hide(similarLoading);
+
+        if (!books.length) {
+          similarGrid.innerHTML = `<p class="col-span-full text-sm text-gray-400">No similar books found.</p>`;
+        } else {
+          similarGrid.innerHTML = books.map((b, i) => buildSimilarCard(b, i)).join('');
+          animateScoreBars(similarGrid);
+        }
+        show(similarGrid);
+      } catch (err) {
+        hide(similarLoading);
+        similarGrid.innerHTML = `<p class="col-span-full text-sm text-red-400">Failed to load similar books.</p>`;
+        show(similarGrid);
+      }
+    }
+
+    closeSimilarBtn.addEventListener('click', () => {
+      hide(similarPanel);
+      activeSimilarId = null;
+    });
+
+    // ─── FEEDBACK ─────────────────────────────────────────────
+    async function submitFeedback(bookId, action, btnEl) {
+      const prev = feedbackState[bookId];
+
+      // optimistic UI update
+      const cardEl = btnEl.closest('.book-card');
+      const allBtns = cardEl?.querySelectorAll('.fb-btn') || [];
+      allBtns.forEach(b => { b.classList.remove('liked', 'disliked'); });
+
+      if (prev === action) {
+        // toggle off
+        delete feedbackState[bookId];
+      } else {
+        feedbackState[bookId] = action;
+        btnEl.classList.add(action);
+      }
+
+      try {
+        await apiFetch('/feedback', {
+          method: 'POST',
+          body:   JSON.stringify({
+            book_id:  bookId,
+            feedback: prev === action ? 'neutral' : action,
+          }),
+        });
+      } catch {
+        // silent fail; optimistic update stays
+      }
+    }
+  </script>
+</body>
+</html>

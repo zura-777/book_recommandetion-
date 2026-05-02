@@ -23,6 +23,7 @@ book-recommender/
 ├── main.py                  ← FastAPI web server
 ├── train.py                 ← Model training script
 ├── download_data.py         ← Auto-download the dataset
+├── download_v2.py           ← Enhanced data download
 └── requirements.txt         ← Python dependencies
 ```
 
